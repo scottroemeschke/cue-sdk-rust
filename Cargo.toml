@@ -1,0 +1,29 @@
+[package]
+name = "cue-sdk"
+description = "A high-level safe wrapper on top of cue-sdk-sys, for interfacing with the iCUE SDK."
+version = "0.0.1"
+authors = ["Scott Meschke <scottmeschke@gmail.com>"]
+license = "MIT"
+edition = "2018"
+repository = "https://github.com/scottroemeschke/cue-sdk-rust"
+documentation = "README.md"
+keywords = ["led", "cue", "corsair", "icue", "rgb"]
+categories = ["api-bindings"]
+
+[dependencies]
+cue-sdk-sys = "0.0.3"
+semver = "0.10.0"
+failure = "0.1.8"
+failure_derive = "0.1.8"
+num-traits = "0.2"
+num-derive = "0.3"
+crossbeam = { version = "0.7.3", optional = true }
+triggered = { version = "0.1.1", optional = true }
+
+[dev-dependencies]
+strum = "0.19.2"
+strum_macros = "0.19.2"
+log = "0.4.11"
+env_logger = "0.7.1"
+rand = "0.7"
+async-std = "1.6.3"
