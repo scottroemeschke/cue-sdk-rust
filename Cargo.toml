@@ -6,7 +6,6 @@ authors = ["Scott Meschke <scottmeschke@gmail.com>"]
 license = "MIT"
 edition = "2018"
 repository = "https://github.com/scottroemeschke/cue-sdk-rust"
-documentation = "README.md"
 keywords = ["led", "cue", "corsair", "icue", "rgb"]
 categories = ["api-bindings"]
 
