@@ -25,6 +25,7 @@ use std::collections::HashMap;
 use std::os::raw::c_char;
 use async_std::sync::Arc;
 use std::sync::Mutex;
+use failure::_core::sync::atomic::{AtomicBool, Ordering};
 
 type CueErrorFfiCallback =
     unsafe extern "C" fn(ctx: *mut c_void, was_successful: bool, err: ffi::CorsairError);
@@ -46,8 +47,8 @@ pub type LayerPriority = u8;
 /// It also houses the `ProtocolDetails` for the current session, and the current `LayerPriority`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CueSdkClient {
-    has_exclusive_access: Mutex<bool>,
-    is_subscribed_to_events: Mutex<bool>,
+    has_exclusive_access: AtomicBool,
+    is_subscribed_to_events: AtomicBool,
     protocol_details: ProtocolDetails,
     priority: LayerPriority,
 }
@@ -70,22 +71,61 @@ pub enum GetDeviceAtIndexError {
     CueDeviceFromDeviceInfoAndIndexError(CueDeviceFromDeviceInfoAndIndexError),
 }
 
+/// The error that can be returned from the `request_exclusive_access` method.
+#[derive(Debug, Clone, Fail)]
+pub enum RequestExclusiveAccessError {
+    #[fail(display = "Failed to get exclusive access, error: {:?}", _0)]
+    CueSdkError(Option<CueSdkError>),
+    #[fail(display = "We already have exclusive access")]
+    AlreadyHaveExclusiveAccessError,
+}
+
+/// The error that can be returned from the `release_exclusive_access` method.
+#[derive(Debug, Clone, Fail)]
+pub enum ReleaseExclusiveAccessError {
+    #[fail(display = "Failed to release exclusive access, error: {:?}", _0)]
+    CueSdkError(Option<CueSdkError>),
+    #[fail(display = "We do not have exclusive access, so nothing to release.")]
+    DoNotHaveExclusiveAccessError,
+}
+
+/// The error that can be returned from any of the event subscription methods.
+#[derive(Debug, Clone, Fail)]
+pub enum SubscribeForEventsError {
+    #[fail(display = "Failed to release exclusive access, error: {:?}", _0)]
+    CueSdkError(Option<CueSdkError>),
+    #[fail(display = "The iCUE SDK only supports a single subscription, and there is already an active subscription.")]
+    AlreadyHaveAnActiveEventSubscriptionError,
+}
+
+/// The error that can be returned from any of the event subscription methods.
+#[derive(Debug, Clone, Fail)]
+pub enum UnsubscribeForEventsError {
+    #[fail(display = "Failed to release exclusive access, error: {:?}", _0)]
+    CueSdkError(Option<CueSdkError>),
+    #[fail(display = "The iCUE SDK only supports a single subscription, and there is already an active subscription.")]
+    NoActiveSubscriptionError,
+}
+
+
 impl CueSdkClient {
     pub(crate) fn initialize() -> Result<Self, HandshakeError> {
         perform_handshake().map(|pd| CueSdkClient {
-            has_exclusive_access: false,
-            is_subscribed_to_events: false,
+            has_exclusive_access: AtomicBool::new(true),
+            is_subscribed_to_events: AtomicBool::new(false),
             protocol_details: pd,
             priority: DEFAULT_SDK_CLIENT_PRIORITY,
         })
     }
 
+    /// Get an immutable reference to the protocol details for the current iCUE SDK handshake.
     fn get_protocol_details(&self) -> &ProtocolDetails {
         &self.protocol_details
     }
 
-    fn get_layer_priority(&self) -> &LayerPriority {
-        &self.priority
+    /// Get the current layer priority.
+    fn get_layer_priority(&self) -> LayerPriority {
+        self.priority
     }
 
     /// Get the current number of connected "iCue" devices.
@@ -155,15 +195,18 @@ impl CueSdkClient {
     /// when the `CueSdkClient` is dropped.
     ///
     /// The "default" mode is non-exclusive.
-    pub fn request_exclusive_access_control(&mut self) -> CueSdkErrorResult {
+    pub fn request_exclusive_access_control(&mut self) -> Result<(), RequestExclusiveAccessError> {
+        if self.has_exclusive_access.load(Ordering::SeqCst) {
+            return Err(RequestExclusiveAccessError::AlreadyHaveExclusiveAccessError);
+        }
         match unsafe {
             ffi::CorsairRequestControl(ffi::CorsairAccessMode_CAM_ExclusiveLightingControl)
         } {
             true => {
-                self.has_exclusive_access = true;
+                self.has_exclusive_access.store(true, Ordering::SeqCst);
                 Ok(())
             }
-            false => Err(get_last_error()),
+            false => Err(RequestExclusiveAccessError::CueSdkError(get_last_error())),
         }
     }
 
@@ -173,15 +216,18 @@ impl CueSdkClient {
     /// to the connected devices.
     ///
     /// Non-exclusive access is the "default" mode.
-    pub fn release_exclusive_access_control(&mut self) -> CueSdkErrorResult {
+    pub fn release_exclusive_access_control(&mut self) -> Result<(), ReleaseExclusiveAccessError> {
+        if !self.has_exclusive_access.load(Ordering::SeqCst) {
+            return Err(ReleaseExclusiveAccessError::DoNotHaveExclusiveAccessError);
+        }
         let successfully_released = unsafe {
             ffi::CorsairReleaseControl(ffi::CorsairAccessMode_CAM_ExclusiveLightingControl)
         };
         if successfully_released {
-            self.has_exclusive_access = false;
+            self.has_exclusive_access.store(true, Ordering::SeqCst);
             Ok(())
         } else {
-            Err(get_last_error())
+            Err(ReleaseExclusiveAccessError::CueSdkError(get_last_error()))
         }
     }
 
@@ -325,10 +371,14 @@ impl CueSdkClient {
     ///
     /// You can unsubscribe manually by calling `unsubscribe_from_events` or the `CueSdkClient`
     /// will unsubscribe automatically if it is subscribed at the time it is dropped.
-    pub fn subscribe_for_events<F>(&mut self, mut closure: F) -> CueSdkErrorResult
+    pub fn subscribe_for_events<F>(&mut self, mut closure: F) -> Result<(), SubscribeForEventsError>
     where
         F: FnMut(Result<CueEvent, CueEventFromFfiError>),
     {
+        if self.is_subscribed_to_events.load(Ordering::SeqCst) {
+            Err(SubscribeForEventsError::AlreadyHaveAnActiveEventSubscription)
+        }
+
         let mut wrapper_closure =
             |ev: *const ffi::CorsairEvent| closure(CueEvent::from_ffi(unsafe { *ev }));
 
@@ -337,19 +387,23 @@ impl CueSdkClient {
             ffi::CorsairSubscribeForEvents(Some(cb), &mut wrapper_closure as *mut _ as *mut c_void)
         };
         if !immediate_result {
-            Err(get_last_error())
+            Err(SubscribeForEventsError::CueSdkError(get_last_error()))
         } else {
-            self.is_subscribed_to_events = true;
+            self.is_subscribed_to_events.store(true, Ordering::SeqCst);
             Ok(())
         }
     }
 
     /// Unsubscribe from all events.
-    pub fn unsubscribe_from_events(&mut self) -> CueSdkErrorResult {
+    pub fn unsubscribe_from_events(&mut self) -> Result<(), UnsubscribeFromEventsError> {
+        if self.is_subscribed_to_events.load(Ordering::SeqCst) {
+            return Err(UnsubscribeForEventsError::NoActiveSubscriptionError);
+        }
         if unsafe { ffi::CorsairUnsubscribeFromEvents() } {
+            self.is_subscribed_to_events.store(true, Ordering::SeqCst);
             Ok(())
         } else {
-            Err(get_last_error())
+            Err(UnsubscribeForEventsError::CueSdkError(get_last_error()))
         }
     }
 

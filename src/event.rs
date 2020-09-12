@@ -199,9 +199,9 @@ mod tests {
     }
 }
 
-/*
-  assert!(matches!(
-       CueEvent::from_ffi(ffi_value).unwrap_err(),
-       CueEventFromFfiError::DeviceIdError(err)
-   ));
-*/
+#[cfg(feature = "async")]
+use tokio::
+
+struct EventSubscription {
+    channel:
+}
