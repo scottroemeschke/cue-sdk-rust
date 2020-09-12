@@ -23,6 +23,8 @@ use crate::led::{CueLed, LedColor, LedId};
 use crate::device::DeviceIndex;
 use std::collections::HashMap;
 use std::os::raw::c_char;
+use async_std::sync::Arc;
+use std::sync::Mutex;
 
 type CueErrorFfiCallback =
     unsafe extern "C" fn(ctx: *mut c_void, was_successful: bool, err: ffi::CorsairError);
@@ -44,10 +46,10 @@ pub type LayerPriority = u8;
 /// It also houses the `ProtocolDetails` for the current session, and the current `LayerPriority`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CueSdkClient {
-    has_exclusive_access: bool,
-    is_subscribed_to_events: bool,
-    pub protocol_details: ProtocolDetails,
-    pub priority: LayerPriority,
+    has_exclusive_access: Mutex<bool>,
+    is_subscribed_to_events: Mutex<bool>,
+    protocol_details: ProtocolDetails,
+    priority: LayerPriority,
 }
 
 /// The error that can be returned from the `get_all_devices` method.
@@ -76,6 +78,14 @@ impl CueSdkClient {
             protocol_details: pd,
             priority: DEFAULT_SDK_CLIENT_PRIORITY,
         })
+    }
+
+    fn get_protocol_details(&self) -> &ProtocolDetails {
+        &self.protocol_details
+    }
+
+    fn get_layer_priority(&self) -> &LayerPriority {
+        &self.priority
     }
 
     /// Get the current number of connected "iCue" devices.
