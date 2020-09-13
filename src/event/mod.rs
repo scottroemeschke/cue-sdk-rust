@@ -5,6 +5,10 @@ use num_traits::FromPrimitive;
 
 use super::key::KeyId;
 use crate::device::{DeviceId, DeviceIdFromFfiError};
+mod subscription;
+
+#[cfg(feature = "async")]
+pub use subscription::EventSubscription;
 
 /// The two-variant event that can come back from the iCUE SDK.
 ///
@@ -198,10 +202,3 @@ mod tests {
         )
     }
 }
-
-/*
-  assert!(matches!(
-       CueEvent::from_ffi(ffi_value).unwrap_err(),
-       CueEventFromFfiError::DeviceIdError(err)
-   ));
-*/

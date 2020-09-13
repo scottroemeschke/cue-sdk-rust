@@ -50,3 +50,11 @@ for this repository [cue-sdk-sys](https://github.com/scottroemeschke/cue-sdk-sys
 
  For additional examples see the [example code](https://github.com/scottroemeschke/cue-sdk-rust)
  and run examples with `cargo run --example {example_name}`.
+ 
+ # Features
+ 
+ ## async
+ 
+ The `async` feature gives additional methods/structs which return futures 
+ instead of taking callbacks/closures.
+ 
