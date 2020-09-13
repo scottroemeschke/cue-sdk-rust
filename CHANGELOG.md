@@ -8,3 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [v0.0.1]
 
 Initial release for CUE SDK version 3.0.55
+
+## [v0.0.2]
+
+### Changed
+- Uses version `0.0.4` of the `cue-sdk-sys` crate, which has `Send` and `Sync` for various 
+C structs coming from the iCUE SDK.
+
+### Added
+- Added `async` feature! Events and color buffer flushing can now be async/awaited.
