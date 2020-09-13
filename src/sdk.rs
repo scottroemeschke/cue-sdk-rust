@@ -23,9 +23,15 @@ use crate::led::{CueLed, LedColor, LedId};
 use crate::device::DeviceIndex;
 use std::collections::HashMap;
 use std::os::raw::c_char;
-use async_std::sync::Arc;
 use std::sync::Mutex;
-use failure::_core::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+#[cfg(feature = "async")]
+use tokio::sync::mpsc;
+#[cfg(feature = "async")]
+use crate::event::EventSubscription;
+#[cfg(feature = "async")]
+use std::sync::Arc;
 
 type CueErrorFfiCallback =
     unsafe extern "C" fn(ctx: *mut c_void, was_successful: bool, err: ffi::CorsairError);
@@ -45,7 +51,7 @@ pub type LayerPriority = u8;
 /// and will clean those up when it is dropped.
 ///
 /// It also houses the `ProtocolDetails` for the current session, and the current `LayerPriority`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub struct CueSdkClient {
     has_exclusive_access: AtomicBool,
     is_subscribed_to_events: AtomicBool,
@@ -100,7 +106,7 @@ pub enum SubscribeForEventsError {
 
 /// The error that can be returned from any of the event subscription methods.
 #[derive(Debug, Clone, Fail)]
-pub enum UnsubscribeForEventsError {
+pub enum UnsubscribeFromEventsError {
     #[fail(display = "Failed to release exclusive access, error: {:?}", _0)]
     CueSdkError(Option<CueSdkError>),
     #[fail(display = "The iCUE SDK only supports a single subscription, and there is already an active subscription.")]
@@ -195,7 +201,7 @@ impl CueSdkClient {
     /// when the `CueSdkClient` is dropped.
     ///
     /// The "default" mode is non-exclusive.
-    pub fn request_exclusive_access_control(&mut self) -> Result<(), RequestExclusiveAccessError> {
+    pub fn request_exclusive_access_control(&self) -> Result<(), RequestExclusiveAccessError> {
         if self.has_exclusive_access.load(Ordering::SeqCst) {
             return Err(RequestExclusiveAccessError::AlreadyHaveExclusiveAccessError);
         }
@@ -216,7 +222,7 @@ impl CueSdkClient {
     /// to the connected devices.
     ///
     /// Non-exclusive access is the "default" mode.
-    pub fn release_exclusive_access_control(&mut self) -> Result<(), ReleaseExclusiveAccessError> {
+    pub fn release_exclusive_access_control(&self) -> Result<(), ReleaseExclusiveAccessError> {
         if !self.has_exclusive_access.load(Ordering::SeqCst) {
             return Err(ReleaseExclusiveAccessError::DoNotHaveExclusiveAccessError);
         }
@@ -371,12 +377,12 @@ impl CueSdkClient {
     ///
     /// You can unsubscribe manually by calling `unsubscribe_from_events` or the `CueSdkClient`
     /// will unsubscribe automatically if it is subscribed at the time it is dropped.
-    pub fn subscribe_for_events<F>(&mut self, mut closure: F) -> Result<(), SubscribeForEventsError>
+    pub fn subscribe_for_events<F>(&self, mut closure: F) -> Result<(), SubscribeForEventsError>
     where
         F: FnMut(Result<CueEvent, CueEventFromFfiError>),
     {
         if self.is_subscribed_to_events.load(Ordering::SeqCst) {
-            Err(SubscribeForEventsError::AlreadyHaveAnActiveEventSubscription)
+            return Err(SubscribeForEventsError::AlreadyHaveAnActiveEventSubscriptionError);
         }
 
         let mut wrapper_closure =
@@ -394,16 +400,54 @@ impl CueSdkClient {
         }
     }
 
-    /// Unsubscribe from all events.
-    pub fn unsubscribe_from_events(&mut self) -> Result<(), UnsubscribeFromEventsError> {
+    /// Subscribe for various events emitted from the iCUE SDK, returning an `EventSubscription`
+    /// which contains async await event streaming methods.
+    ///
+    /// You can unsubscribe manually by calling `unsubscribe_from_events` or the `CueSdkClient`
+    /// will unsubscribe automatically if it is subscribed at the time it is dropped.
+    /// Additionally if the `EventSubscription` is dropped, or it's `unsubscribe` method is called
+    /// you will be unsubscribed.
+    #[cfg(feature = "async")]
+    pub fn subscribe_for_events_async(&self) -> Result<EventSubscription, SubscribeForEventsError> {
+        let (tx,rx) = mpsc::channel(20);
+        let mut tx2 = Arc::new(Mutex::new(tx));
         if self.is_subscribed_to_events.load(Ordering::SeqCst) {
-            return Err(UnsubscribeForEventsError::NoActiveSubscriptionError);
+            return Err(SubscribeForEventsError::AlreadyHaveAnActiveEventSubscriptionError)
+        };
+
+        let mut wrapper_closure = {
+            |ev: *const ffi::CorsairEvent| {
+                let event = unsafe { *ev };
+                // playing it "safe" as this code is called from C, and panicking there is UB
+                if let Some(mut c) = tx2.lock()
+                    .ok() {
+                    c.send(CueEvent::from_ffi(event));
+                }
+            }
+        };
+
+        let cb = get_event_callback(&wrapper_closure);
+        let immediate_result = unsafe {
+            ffi::CorsairSubscribeForEvents(Some(cb), &mut wrapper_closure as *mut _ as *mut c_void)
+        };
+        if !immediate_result {
+            Err(SubscribeForEventsError::CueSdkError(get_last_error()))
+        } else {
+            self.is_subscribed_to_events.store(true, Ordering::SeqCst);
+            Ok(EventSubscription::new(rx, &self))
+        }
+    }
+
+    /// Unsubscribe from all events.
+    pub fn unsubscribe_from_events(&self) -> Result<(), UnsubscribeFromEventsError> {
+        if self.is_subscribed_to_events.load(Ordering::SeqCst) {
+            return Err(UnsubscribeFromEventsError::NoActiveSubscriptionError);
         }
         if unsafe { ffi::CorsairUnsubscribeFromEvents() } {
             self.is_subscribed_to_events.store(true, Ordering::SeqCst);
             Ok(())
         } else {
-            Err(UnsubscribeForEventsError::CueSdkError(get_last_error()))
+            Err(UnsubscribeFromEventsError::CueSdkError(get_last_error()))
         }
     }
 
@@ -463,10 +507,10 @@ where
 /// exclusive access rights and release/unsubscribe if needed.
 impl Drop for CueSdkClient {
     fn drop(&mut self) {
-        if self.has_exclusive_access {
+        if self.has_exclusive_access.load(Ordering::Acquire) {
             self.release_exclusive_access_control().unwrap_or(());
         }
-        if self.is_subscribed_to_events {
+        if self.is_subscribed_to_events.load(Ordering::Acquire) {
             self.unsubscribe_from_events().unwrap_or(());
         }
     }

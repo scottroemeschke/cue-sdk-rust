@@ -5,6 +5,10 @@ use num_traits::FromPrimitive;
 
 use super::key::KeyId;
 use crate::device::{DeviceId, DeviceIdFromFfiError};
+mod subscription;
+
+#[cfg(feature = "async")]
+pub use subscription::EventSubscription;
 
 /// The two-variant event that can come back from the iCUE SDK.
 ///
@@ -197,11 +201,4 @@ mod tests {
             CueEvent::KeyEvent(DeviceId("0@P 0 0@\u{10}\u{11}\u{12}\u{13}0@P 0 0@\u{10}\u{11}\u{12}\u{13}0@P 0 0@\u{10}\u{11}\u{12}\u{13}0@P 0 0@\u{10}\u{11}\u{12}\u{13}0@P 0 0@\u{10}\u{11}\u{12}\u{13}0@P 0 0@\u{10}\u{11}\u{12}\u{13}0@P 0 0@\u{10}\u{11}\u{12}\u{13}0@P 0 0@\u{10}\u{11}\u{12}\u{13}0@P 0 0@\u{10}\u{11}\u{12}\u{13}0@P 0 0@\u{10}\u{11}\u{12}\u{13}0@P 0 0@".to_string()), KeyId::KeyboardG2, true)
         )
     }
-}
-
-#[cfg(feature = "async")]
-use tokio::
-
-struct EventSubscription {
-    channel:
 }
