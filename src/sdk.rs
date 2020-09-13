@@ -23,15 +23,15 @@ use crate::led::{CueLed, LedColor, LedId};
 use crate::device::DeviceIndex;
 use std::collections::HashMap;
 use std::os::raw::c_char;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
-#[cfg(feature = "async")]
-use tokio::sync::mpsc;
 #[cfg(feature = "async")]
 use crate::event::EventSubscription;
 #[cfg(feature = "async")]
 use std::sync::Arc;
+#[cfg(feature = "async")]
+use tokio::sync::mpsc;
 
 type CueErrorFfiCallback =
     unsafe extern "C" fn(ctx: *mut c_void, was_successful: bool, err: ffi::CorsairError);
@@ -100,7 +100,9 @@ pub enum ReleaseExclusiveAccessError {
 pub enum SubscribeForEventsError {
     #[fail(display = "Failed to release exclusive access, error: {:?}", _0)]
     CueSdkError(Option<CueSdkError>),
-    #[fail(display = "The iCUE SDK only supports a single subscription, and there is already an active subscription.")]
+    #[fail(
+        display = "The iCUE SDK only supports a single subscription, and there is already an active subscription."
+    )]
     AlreadyHaveAnActiveEventSubscriptionError,
 }
 
@@ -109,10 +111,11 @@ pub enum SubscribeForEventsError {
 pub enum UnsubscribeFromEventsError {
     #[fail(display = "Failed to release exclusive access, error: {:?}", _0)]
     CueSdkError(Option<CueSdkError>),
-    #[fail(display = "The iCUE SDK only supports a single subscription, and there is already an active subscription.")]
+    #[fail(
+        display = "The iCUE SDK only supports a single subscription, and there is already an active subscription."
+    )]
     NoActiveSubscriptionError,
 }
-
 
 impl CueSdkClient {
     pub(crate) fn initialize() -> Result<Self, HandshakeError> {
@@ -125,12 +128,12 @@ impl CueSdkClient {
     }
 
     /// Get an immutable reference to the protocol details for the current iCUE SDK handshake.
-    fn get_protocol_details(&self) -> &ProtocolDetails {
+    pub fn get_protocol_details(&self) -> &ProtocolDetails {
         &self.protocol_details
     }
 
     /// Get the current layer priority.
-    fn get_layer_priority(&self) -> LayerPriority {
+    pub fn get_layer_priority(&self) -> LayerPriority {
         self.priority
     }
 
@@ -373,6 +376,45 @@ impl CueSdkClient {
         }
     }
 
+    /// Queues a flush of the iCUE SDK buffer, calling the passed in closure when the flush completes (successfully or not).
+    ///
+    /// After updating the color buffer, flushing it will send the led update commands to the specified
+    /// `CueLed`s.
+    ///
+    /// This can take "some" time, and so there is a synchronous and asynchronous option.
+    ///
+    #[cfg(feature = "async")]
+    pub async fn flush_led_colors_update_buffer_async(&self) -> CueSdkErrorResult {
+        let (tx, mut rx) = mpsc::channel::<CueSdkErrorResult>(1);
+        let tx2 = Arc::new(Mutex::new(tx));
+
+        let mut wrapper_closure = |was_successful: bool, err: ffi::CorsairError| {
+            if let Ok(mut c) = tx2.lock() {
+                if was_successful {
+                    let _ = c.try_send(Ok(()));
+                } else {
+                    let _ = c.try_send(Err(CueSdkError::from_u32(err)));
+                }
+            }
+        };
+
+        let cb = get_error_callback(&wrapper_closure);
+        let immediate_result = unsafe {
+            ffi::CorsairSetLedsColorsFlushBufferAsync(
+                Some(cb),
+                &mut wrapper_closure as *mut _ as *mut c_void,
+            )
+        };
+        if !immediate_result {
+            Err(get_last_error())
+        } else {
+            match rx.recv().await {
+                Some(r) => r,
+                None => Ok(()),
+            }
+        }
+    }
+
     /// Subscribe for various events emitted from the iCUE SDK, with the passed in closure.
     ///
     /// You can unsubscribe manually by calling `unsubscribe_from_events` or the `CueSdkClient`
@@ -409,19 +451,18 @@ impl CueSdkClient {
     /// you will be unsubscribed.
     #[cfg(feature = "async")]
     pub fn subscribe_for_events_async(&self) -> Result<EventSubscription, SubscribeForEventsError> {
-        let (tx,rx) = mpsc::channel(20);
-        let mut tx2 = Arc::new(Mutex::new(tx));
+        let (tx, rx) = mpsc::channel(20);
+        let tx2 = Arc::new(Mutex::new(tx));
         if self.is_subscribed_to_events.load(Ordering::SeqCst) {
-            return Err(SubscribeForEventsError::AlreadyHaveAnActiveEventSubscriptionError)
+            return Err(SubscribeForEventsError::AlreadyHaveAnActiveEventSubscriptionError);
         };
 
         let mut wrapper_closure = {
             |ev: *const ffi::CorsairEvent| {
                 let event = unsafe { *ev };
                 // playing it "safe" as this code is called from C, and panicking there is UB
-                if let Some(mut c) = tx2.lock()
-                    .ok() {
-                    c.send(CueEvent::from_ffi(event));
+                if let Some(mut c) = tx2.lock().ok() {
+                    let _ = c.try_send(CueEvent::from_ffi(event));
                 }
             }
         };
