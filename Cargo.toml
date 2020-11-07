@@ -10,7 +10,7 @@ keywords = ["led", "cue", "corsair", "icue", "rgb"]
 categories = ["api-bindings"]
 
 [dependencies]
-cue-sdk-sys = "0.0.3"
+cue-sdk-sys = "0.0.5"
 semver = "0.10.0"
 failure = "0.1.8"
 failure_derive = "0.1.8"
