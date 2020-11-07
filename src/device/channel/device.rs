@@ -13,6 +13,8 @@ pub enum ChannelDeviceType {
     Dap = ffi::CorsairChannelDeviceType_CCDT_DAP,
     Pump = ffi::CorsairChannelDeviceType_CCDT_Pump,
     QlFan = ffi::CorsairChannelDeviceType_CCDT_QL_Fan,
+    WaterBlock = ffi::CorsairChannelDeviceType_CCDT_WaterBlock,
+    SpProFan = ffi::CorsairChannelDeviceType_CCDT_SPPRO_Fan,
 }
 
 /// Not to be confused with a `CueDevice` a `ChannelDevice` is attached to a `Channel` which is a
