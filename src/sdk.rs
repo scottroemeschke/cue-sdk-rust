@@ -24,7 +24,6 @@ use crate::device::DeviceIndex;
 use std::collections::HashMap;
 use std::os::raw::c_char;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
 
 #[cfg(feature = "async")]
 use crate::event::EventSubscription;
