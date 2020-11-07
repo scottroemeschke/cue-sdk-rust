@@ -1,7 +1,9 @@
 #[cfg(feature = "async")]
 use tokio::sync::mpsc;
 
+#[cfg(feature = "async")]
 use super::{CueEvent, CueEventFromFfiError};
+#[cfg(feature = "async")]
 use crate::sdk::{CueSdkClient, UnsubscribeFromEventsError};
 
 /// An event subscription, which you can await for the next event, optimistically "check"

@@ -11,10 +11,10 @@ impl DeviceCapabilities {
     pub(crate) fn from_ffi(bitmask: i32) -> Self {
         let lighting_val = bitmask & ffi::CorsairDeviceCaps_CDC_Lighting as i32;
         let property_lookup_val = bitmask & ffi::CorsairDeviceCaps_CDC_PropertyLookup as i32;
-        return DeviceCapabilities {
+        DeviceCapabilities {
             lighting: lighting_val != 0,
             property_lookup: property_lookup_val != 0,
-        };
+        }
     }
 }
 
