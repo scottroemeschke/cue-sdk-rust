@@ -11,20 +11,20 @@ categories = ["api-bindings"]
 
 [dependencies]
 cue-sdk-sys = "0.0.5"
-semver = "0.10.0"
+semver = "0.11.0"
 failure = "0.1.8"
 failure_derive = "0.1.8"
 num-traits = "0.2"
 num-derive = "0.3"
-tokio = { version = "0.2.2", optional = true, features = ["full"] }
+tokio = { version = "0.3.3", optional = true, features = ["full"] }
 
 [dev-dependencies]
-strum = "0.19.2"
-strum_macros = "0.19.2"
+strum = "0.19.5"
+strum_macros = "0.19.4"
 log = "0.4.11"
-env_logger = "0.7.1"
+env_logger = "0.8.1"
 rand = "0.7"
-async-std = "1.6.3"
+async-std = "1.7.0"
 
 [features]
 async = ["tokio"]
