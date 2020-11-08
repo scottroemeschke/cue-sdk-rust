@@ -17,3 +17,13 @@ C structs coming from the iCUE SDK.
 
 ### Added
 - Added `async` feature! Events and color buffer flushing can now be async/awaited.
+
+## [v0.0.3]
+
+### Changed
+- Updates `cue_sdk_sys` to `0.0.5`.
+
+### Fixed
+- Fixed requiring all features of tokio, instead of just `sync`.
+- Fixed async examples.
+- Fixed various clippy warnings.
