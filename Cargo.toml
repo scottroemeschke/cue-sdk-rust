@@ -1,7 +1,7 @@
 [package]
 name = "cue-sdk"
 description = "A high-level safe wrapper on top of cue-sdk-sys, for interfacing with the iCUE SDK."
-version = "0.0.2"
+version = "0.0.3"
 authors = ["Scott Meschke <scottmeschke@gmail.com>"]
 license = "MIT"
 edition = "2018"
