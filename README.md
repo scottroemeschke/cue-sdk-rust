@@ -1,60 +1,116 @@
 # cue-sdk
 
-A high level rust wrapper for the native [iCUE SDK](https://github.com/CorsairOfficial/cue-sdk).
+[![Crates.io](https://img.shields.io/crates/v/cue-sdk)](https://crates.io/crates/cue-sdk)
+[![docs.rs](https://img.shields.io/docsrs/cue-sdk)](https://docs.rs/cue-sdk)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-If you are looking for low-level (and unsafe) access, check out the parent crate 
-for this repository [cue-sdk-sys](https://github.com/scottroemeschke/cue-sdk-sys).
+A safe, high-level Rust wrapper for the [iCUE SDK v4](https://github.com/CorsairOfficial/cue-sdk).
 
- # Quick Start
+For low-level (unsafe) FFI bindings, see the companion crate
+[cue-sdk-sys](https://github.com/scottroemeschke/cue-sdk-sys).
 
- Make sure you set the required environment variables for the [cue-sdk-sys](https://crates.io/crates/cue-sdk-sys)
- dependency crate.
+## Prerequisites
 
- If you need the binaries, the easiest place to get them is on the [Github Releases Page](https://github.com/CorsairOfficial/cue-sdk).
- Since we can't build them from scratch (not open source) you have to get them yourself.
+You need the iCUE SDK native libraries. Download them from the
+[iCUE SDK releases page](https://github.com/CorsairOfficial/cue-sdk/releases)
+and set the environment variables required by
+[cue-sdk-sys](https://crates.io/crates/cue-sdk-sys).
 
- This version of the crate is built against version [3.0.55](https://github.com/CorsairOfficial/cue-sdk/releases/tag/v3.0.355)
- of the iCUE SDK.
+The SDK DLLs/dylibs must be available at runtime (e.g. in your executable's
+directory or on your system `PATH`/`LD_LIBRARY_PATH`). If they are missing
+you will get `STATUS_DLL_NOT_FOUND` on Windows.
 
- # Example Code
+iCUE must be running on the target machine for the SDK to connect.
 
- ```rust
- use cue_sdk::led::LedColor;
- use cue_sdk::initialize;
- let sdk = initialize()
-     .expect("failed to initialize sdk");
- let mut  devices = sdk.get_all_devices().expect("failed to get all devices");
- let new_color = LedColor { red: 200, green: 20, blue: 165 };
- for d in &mut devices {
-     //print some info
-     println!("Device: {:?} at index {:?} has led count: ${:?}",
-         d.device_info.model, d.device_index, d.leds.len());
+## Quick Start
 
-     // set the first led in every device to our `new_color` color
-     d.leds.first_mut().unwrap().update_color_buffer(new_color);
- }
- //flush the colors buffer (send to device hardware)
- sdk.flush_led_colors_update_buffer_sync()
-     .expect("failed to flush led buffer");
- ```
+```rust
+use std::time::Duration;
+use cue_sdk::device::DeviceType;
+use cue_sdk::led::LedColor;
 
- You can note from the following example, most "write" operations can fail
- for a variety of reasons including but not limited to:
+let session = cue_sdk::connect().expect("connect failed");
+session.wait_for_connection(Duration::from_secs(5)).expect("timeout");
 
- - device state changes (devices have been unplugged/plugged in)
- - ffi interfacing (pointer derefs, etc) fail due to undocumented breaking changes in the iCUE SDK,
- or a bug in the crate code
- - another client has requested exclusive access
+let devices = session.get_devices(DeviceType::ALL).expect("get_devices");
+for dev in &devices {
+    println!("{} ({}, {} LEDs)", dev.model, dev.id, dev.led_count);
+}
+```
 
- # Examples
+## Setting LED Colors
 
- For additional examples see the [example code](https://github.com/scottroemeschke/cue-sdk-rust)
- and run examples with `cargo run --example {example_name}`.
- 
- # Features
- 
- ## async
- 
- The `async` feature gives additional methods/structs which return futures 
- instead of taking callbacks/closures.
- 
+```rust
+use std::time::Duration;
+use cue_sdk::device::DeviceType;
+use cue_sdk::led::LedColor;
+
+let session = cue_sdk::connect().expect("connect failed");
+session.wait_for_connection(Duration::from_secs(5)).expect("timeout");
+
+let devices = session.get_devices(DeviceType::KEYBOARD).expect("get_devices");
+let device = devices.first().expect("no keyboard found");
+
+let positions = session.get_led_positions(&device.id).expect("get_led_positions");
+let colors: Vec<LedColor> = positions
+    .iter()
+    .map(|pos| LedColor::rgb(pos.id, 255, 0, 0))
+    .collect();
+
+session.set_led_colors(&device.id, &colors).expect("set_led_colors");
+```
+
+## Listening for Events
+
+```rust
+use std::time::Duration;
+use cue_sdk::event::Event;
+
+let session = cue_sdk::connect().expect("connect failed");
+session.wait_for_connection(Duration::from_secs(5)).expect("timeout");
+
+let subscription = session.subscribe_for_events().expect("subscribe");
+for event in subscription.iter() {
+    match event {
+        Event::DeviceConnectionChanged { device_id, is_connected } => {
+            println!("Device {} {}", device_id,
+                if is_connected { "connected" } else { "disconnected" });
+        }
+        Event::KeyEvent { device_id, key_id, is_pressed } => {
+            println!("Key {:?} {} on {}", key_id,
+                if is_pressed { "pressed" } else { "released" }, device_id);
+        }
+    }
+}
+```
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| `async` | Adds optional `tokio` dependency for async event support |
+
+## Examples
+
+Run the included examples with:
+
+```sh
+cargo run --example connect        # Print SDK version info
+cargo run --example devices        # List connected devices
+cargo run --example set_colors     # Set all keyboard LEDs to red
+cargo run --example events         # Listen for device/key events
+```
+
+## Architecture
+
+- **`Session`** is the single entry point for all SDK operations. Call
+  `cue_sdk::connect()` to create one; it calls `CorsairDisconnect` on drop.
+- Devices are identified by **`DeviceId`** (a 128-byte string), not indices.
+- **`LedColor`** is `#[repr(C)]` and layout-identical to the native
+  `CorsairLedColor` struct for zero-copy FFI.
+- **`EventSubscription`** auto-unsubscribes on drop.
+- All `unsafe` blocks have `// SAFETY` comments.
+
+## License
+
+[MIT](LICENSE)
