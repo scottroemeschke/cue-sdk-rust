@@ -20,17 +20,20 @@ fn sdk_smoke_test() {
     // CorsairConnect starts an async connection attempt.  It should succeed
     // immediately even without iCUE; it only registers the callback and
     // begins trying to reach the server.
+    eprintln!("[smoke] step 1: connect()");
     let session = cue_sdk::connect().expect("connect() should succeed even without iCUE");
 
     // -- Step 2: Read session details (real SDK data!) --
     // CorsairGetSessionDetails returns version info.  The *client* version is
     // baked into the native library, so it should be available regardless of
     // whether iCUE is running.
+    eprintln!("[smoke] step 2: details()");
     let details = session
         .details()
         .expect("details() should succeed after connect()");
 
     // The client version must match the SDK we link against (v4.x.x).
+    eprintln!("[smoke] client_version = {}", details.client_version);
     assert_eq!(
         details.client_version.major, 4,
         "expected client SDK major version 4, got {}",
@@ -56,6 +59,7 @@ fn sdk_smoke_test() {
 
     // -- Step 3: Wait for connection (expect timeout) --
     // The callback trampoline should fire with Connecting → Timeout states.
+    eprintln!("[smoke] step 3: wait_for_connection()");
     let result = session.wait_for_connection(Duration::from_millis(500));
     assert_eq!(
         result.unwrap_err(),
@@ -66,6 +70,7 @@ fn sdk_smoke_test() {
     // -- Step 4: Call get_devices (should fail gracefully) --
     // After the connection attempt timed out, device queries should return
     // an appropriate error rather than crashing or hanging.
+    eprintln!("[smoke] step 4: get_devices()");
     let devices_result = session.get_devices(DeviceType::ALL);
     assert!(
         devices_result.is_err(),
@@ -75,9 +80,11 @@ fn sdk_smoke_test() {
     // -- Step 5: Lifecycle — disconnect and reconnect --
     // Drop the first session (calls CorsairDisconnect), then create a new
     // one to verify the SDK can be re-initialized cleanly.
+    eprintln!("[smoke] step 5: drop + reconnect");
     drop(session);
 
     let session2 = cue_sdk::connect().expect("reconnect after disconnect should succeed");
+    eprintln!("[smoke] step 5b: details() on second session");
     let details2 = session2
         .details()
         .expect("details() should work on second session");
@@ -86,4 +93,6 @@ fn sdk_smoke_test() {
         "client version should still be 4 after reconnect, got {}",
         details2.client_version
     );
+
+    eprintln!("[smoke] all steps passed");
 }
