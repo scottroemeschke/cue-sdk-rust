@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: scottroemeschke/cue-sdk-sys
+          path: ../cue-sdk-sys
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy -- -D warnings
+      - run: cargo clippy --features async -- -D warnings
+
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: scottroemeschke/cue-sdk-sys
+          path: ../cue-sdk-sys
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check
+      - run: cargo check --features async
+
+  smoke-windows:
+    name: Smoke Test (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: scottroemeschke/cue-sdk-sys
+          path: ../cue-sdk-sys
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Read SDK version
+        id: sdk-version
+        shell: bash
+        run: |
+          source cue_sdk_version
+          echo "version=$CUE_SDK_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download iCUE SDK
+        shell: pwsh
+        run: |
+          $version = "${{ steps.sdk-version.outputs.version }}"
+          $url = "https://github.com/CorsairOfficial/cue-sdk/releases/download/v${version}/iCUESDK_${version}.zip"
+          Invoke-WebRequest -Uri $url -OutFile sdk.zip
+
+      - name: Extract SDK
+        shell: pwsh
+        run: Expand-Archive -Path sdk.zip -DestinationPath sdk
+
+      - name: Set SDK environment
+        shell: bash
+        run: |
+          echo "CUE_SDK_LIB_FILES_PATH=${{ github.workspace }}/sdk/iCUESDK/lib/x64" >> "$GITHUB_ENV"
+          echo "${{ github.workspace }}/sdk/iCUESDK/redist/x64" >> "$GITHUB_PATH"
+
+      - name: Run smoke test
+        run: cargo test --test smoke
+
+  smoke-macos:
+    name: Smoke Test (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: scottroemeschke/cue-sdk-sys
+          path: ../cue-sdk-sys
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Read SDK version
+        id: sdk-version
+        run: |
+          source cue_sdk_version
+          echo "version=$CUE_SDK_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download iCUE SDK
+        run: |
+          version="${{ steps.sdk-version.outputs.version }}"
+          url="https://github.com/CorsairOfficial/cue-sdk/releases/download/v${version}/iCUESDK_${version}.dmg"
+          curl -fSL "$url" -o sdk.dmg
+
+      - name: Mount DMG and extract framework
+        run: |
+          hdiutil attach sdk.dmg -mountpoint /Volumes/iCUESDK
+          mkdir -p sdk_framework
+          cp -R /Volumes/iCUESDK/*.framework sdk_framework/ || cp -R /Volumes/iCUESDK/**/*.framework sdk_framework/
+          hdiutil detach /Volumes/iCUESDK
+
+      - name: Set SDK environment
+        run: |
+          echo "CUE_SDK_FRAMEWORK_PATH=${{ github.workspace }}/sdk_framework" >> "$GITHUB_ENV"
+          echo "DYLD_FRAMEWORK_PATH=${{ github.workspace }}/sdk_framework" >> "$GITHUB_ENV"
+
+      - name: Run smoke test
+        run: cargo test --test smoke
