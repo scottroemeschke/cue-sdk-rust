@@ -15,8 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Clone cue-sdk-sys
-        run: git clone --depth 1 https://github.com/scottroemeschke/cue-sdk-sys.git ../cue-sdk-sys
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -30,8 +28,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Clone cue-sdk-sys
-        run: git clone --depth 1 https://github.com/scottroemeschke/cue-sdk-sys.git ../cue-sdk-sys
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo check
@@ -42,8 +38,6 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Clone cue-sdk-sys
-        run: git clone --depth 1 https://github.com/scottroemeschke/cue-sdk-sys.git ../cue-sdk-sys
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -79,8 +73,6 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Clone cue-sdk-sys
-        run: git clone --depth 1 https://github.com/scottroemeschke/cue-sdk-sys.git ../cue-sdk-sys
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
