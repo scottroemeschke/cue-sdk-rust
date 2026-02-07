@@ -66,7 +66,7 @@ jobs:
           echo "${{ github.workspace }}/sdk/iCUESDK/redist/x64" >> "$GITHUB_PATH"
 
       - name: Run smoke test
-        run: cargo test --test smoke -- --nocapture
+        run: cargo test --test smoke
 
   smoke-macos:
     name: Smoke Test (macOS)
@@ -101,4 +101,4 @@ jobs:
           echo "DYLD_FRAMEWORK_PATH=${{ github.workspace }}/sdk_framework" >> "$GITHUB_ENV"
 
       - name: Run smoke test
-        run: cargo test --test smoke -- --nocapture
+        run: cargo test --test smoke
