@@ -10,7 +10,7 @@ keywords = ["led", "cue", "corsair", "icue", "rgb"]
 categories = ["api-bindings"]
 
 [dependencies]
-cue-sdk-sys = { version = "0.1.0", path = "../cue-sdk-sys/cue-sdk-sys" }
+cue-sdk-sys = "0.1.0"
 thiserror = "2"
 bitflags = "2"
 tokio = { version = "1", optional = true, features = ["sync"] }
