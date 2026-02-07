@@ -1,52 +1,38 @@
-extern crate cue_sdk;
-extern crate env_logger;
-
-use env_logger::Env;
-use log::{info, warn};
-
-use cue_sdk::event::CueEvent;
 use std::time::Duration;
 
-pub fn main() {
-    env_logger::init_from_env(Env::new().filter("CUE_SDK_EXAMPLES_LOG_LEVEL"));
+use cue_sdk::event::Event;
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("failed to create tokio runtime");
+fn main() {
+    let session = cue_sdk::connect().expect("failed to connect");
+    let _details = session
+        .wait_for_connection(Duration::from_secs(5))
+        .expect("timeout waiting for iCUE");
 
-    rt.block_on(async {
-        let mut sdk = cue_sdk::initialize().expect("failed to initialize sdk");
+    let subscription = session.subscribe_for_events().expect("failed to subscribe");
 
-        info!("subscribing to events..");
-        sdk.subscribe_for_events(|result| match result {
-            Ok(ev) => match ev {
-                CueEvent::KeyEvent(device_id, key_id, is_pressed) => {
-                    info!("A key event occurred!");
-                    info!(
-                        "device_id: {:?}, key_id: {:?}, is now pressed: {:?}",
-                        device_id, key_id, is_pressed
-                    );
-                }
-                CueEvent::DeviceConnectedStatusChangedEvent(device_id, is_connected) => {
-                    info!("A device connection status changed event occurred!");
-                    info!(
-                        "device_id: {:?}, is now connected: {:?}",
-                        device_id, is_connected
-                    );
-                }
-            },
-            Err(err) => {
-                warn!("There was an error getting an event from ffi: {:?}", err);
+    println!("Listening for events... Press Ctrl+C to exit.");
+
+    for event in subscription.iter() {
+        match event {
+            Event::DeviceConnectionChanged {
+                device_id,
+                is_connected,
+            } => {
+                let action = if is_connected {
+                    "connected"
+                } else {
+                    "disconnected"
+                };
+                println!("Device {} {}", device_id, action);
             }
-        })
-        .expect("failed to subscribe for events.");
-
-        info!("We have subscribed... waiting 5 seconds...");
-        let handle = task::sleep(Duration::from_secs(5));
-        handle.await;
-    });
-
-    //We will unsubscribe for events if you are currently subscribed and drop the SDK
-    info!("sdk has been dropped so we have unsubscribed from events");
+            Event::KeyEvent {
+                device_id,
+                key_id,
+                is_pressed,
+            } => {
+                let action = if is_pressed { "pressed" } else { "released" };
+                println!("Key {:?} {} on device {}", key_id, action, device_id);
+            }
+        }
+    }
 }

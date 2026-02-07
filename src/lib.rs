@@ -1,88 +1,48 @@
-//!  cue-sdk - A safe wrapper for the Corsair iCUE SDK.
-//!
-//! cue-sdk provides core functionality for interfacing with the
-//! Corsair iCUE SDK, through the [cue-sdk-sys](https://crates.io/crates/cue-sdk-sys) crate.
+//! A safe, high-level wrapper for the Corsair iCUE SDK v4.
 //!
 //! # Quick Start
 //!
-//! Make sure you set the required environment variables for the [cue-sdk-sys](https://crates.io/crates/cue-sdk-sys)
-//! dependency crate.
-//!
-//! If you need the binaries, the easiest place to get them is on the [Github Releases Page](https://github.com/CorsairOfficial/cue-sdk).
-//! Since we can't build them from scratch (not open source) you have to get them yourself.
-//!
-//! This version of the crate is built against version [3.0.55](https://github.com/CorsairOfficial/cue-sdk/releases/tag/v3.0.355)
-//! of the iCUE SDK.
-//!
-//! # Example Code
-//!
-//! ```
+//! ```no_run
+//! use std::time::Duration;
+//! use cue_sdk::device::DeviceType;
 //! use cue_sdk::led::LedColor;
-//! use cue_sdk::initialize;
-//! let sdk = initialize()
-//!     .expect("failed to initialize sdk");
-//! let mut  devices = sdk.get_all_devices().expect("failed to get all devices");
-//! let new_color = LedColor { red: 200, green: 20, blue: 165 };
-//! for d in &mut devices {
-//!     //print some info
-//!     println!("Device: {:?} at index {:?} has led count: ${:?}",
-//!         d.device_info.model, d.device_index, d.leds.len());
 //!
-//!     // set the first led in every device to our `new_color` color
-//!     d.leds.first_mut().unwrap().update_color_buffer(new_color);
+//! let session = cue_sdk::connect().expect("connect failed");
+//! session.wait_for_connection(Duration::from_secs(5)).expect("timeout");
+//!
+//! let devices = session.get_devices(DeviceType::ALL).expect("get_devices");
+//! for dev in &devices {
+//!     println!("{} ({})", dev.model, dev.id);
 //! }
-//! //flush the colors buffer (send to device hardware)
-//! sdk.flush_led_colors_update_buffer_sync()
-//!     .expect("failed to flush led buffer");
 //! ```
 //!
-//! You can note from the following example, most "write" operations can fail
-//! for a variety of reasons including but not limited to:
+//! # Architecture
 //!
-//! - device state changes (devices have been unplugged/plugged in)
-//! - ffi interfacing (pointer derefs, etc) fail due to undocumented breaking changes in the iCUE SDK,
-//! or a bug in the crate code
-//! - another client has requested exclusive access
+//! [`Session`] is the single entry point for all SDK operations.  Call
+//! [`connect()`] to create one; it calls `CorsairDisconnect` on drop.
 //!
-//! # Examples
-//!
-//! For additional examples see the [example code](https://github.com/scottroemeschke/cue-sdk-rust)
-//! and run examples with `cargo run --example {example_name}`.
-//!
-//!
-#[macro_use]
-extern crate failure_derive;
-#[macro_use]
-extern crate num_derive;
+//! Device information is returned as plain data structs ([`DeviceInfo`],
+//! [`LedPosition`]).  Operations that need a device take a [`&DeviceId`]
+//! parameter.
 
-#[cfg(test)]
-#[macro_use]
-extern crate strum_macros;
-
-pub(crate) mod internal;
-
+pub(crate) mod callback;
 pub mod device;
-pub mod errors;
+pub mod error;
 pub mod event;
-pub mod initialization;
-pub mod key;
 pub mod led;
 pub mod property;
-pub mod sdk;
+pub mod session;
 
-use crate::sdk::CueSdkClient;
-use initialization::HandshakeError;
+pub use device::{DeviceId, DeviceInfo, DeviceType};
+pub use error::{Result, SdkError};
+pub use event::{Event, EventSubscription, MacroKeyId};
+pub use led::{LedColor, LedPosition};
+pub use property::{PropertyId, PropertyValue};
+pub use session::{AccessLevel, Session, SessionDetails, SessionState, Version};
 
-/// This is the single and only way currently to initialize the SDK.
+/// Connect to the iCUE SDK and return a [`Session`].
 ///
-/// This method can fail for a variety of reasons, the most likely being
-/// that the Corsair iCUE software isn't running on the target machine.
-///
-/// See [`HandshakeError`] error, for more details.
-///
-/// We recommend you keep a single instance of the SDK for your application,
-/// as the iCUE SDK does not expect multiple handshakes.
-///
-pub fn initialize() -> Result<CueSdkClient, HandshakeError> {
-    CueSdkClient::initialize()
+/// This is a convenience wrapper around [`Session::connect()`].
+pub fn connect() -> Result<Session> {
+    Session::connect()
 }
