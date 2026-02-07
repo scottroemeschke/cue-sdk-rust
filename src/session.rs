@@ -13,6 +13,7 @@ use crate::event::AsyncEventSubscription;
 use crate::event::{EventSubscription, MacroKeyId};
 use crate::led::{LedColor, LedPosition};
 use crate::property::{DataType, PropertyFlags, PropertyId, PropertyInfo, PropertyValue};
+use std::ptr;
 
 // ---------------------------------------------------------------------------
 // Version
@@ -123,8 +124,6 @@ pub enum AccessLevel {
 /// Only one `Session` should exist at a time per process.
 pub struct Session {
     state_rx: mpsc::Receiver<SessionStateChange>,
-    // Prevent the sender from being dropped while the SDK holds the pointer.
-    _state_sender: callback::SessionStateSender,
 }
 
 // SAFETY: The iCUE SDK is documented as thread-safe.  All SDK functions may be
@@ -140,19 +139,17 @@ impl Session {
     /// Use [`wait_for_connection`](Self::wait_for_connection) afterwards to
     /// block until the session reaches the `Connected` state.
     pub fn connect() -> Result<Self> {
-        let (sender, rx) = callback::session_state_channel();
-        let ctx = callback::sender_as_context(&sender);
+        let (tx, rx) = mpsc::channel();
+        callback::install_session_sender(tx);
 
-        // SAFETY: We pass a valid function pointer and a context pointer derived
-        // from a pinned boxed sender that we keep alive in the returned `Session`.
+        // SAFETY: We pass a valid function pointer.  The context pointer is null
+        // because the trampoline reads from the process-wide static instead of
+        // dereferencing the context (see `session_state_trampoline`).
         error::check(unsafe {
-            ffi::CorsairConnect(Some(callback::session_state_trampoline), ctx)
+            ffi::CorsairConnect(Some(callback::session_state_trampoline), ptr::null_mut())
         })?;
 
-        Ok(Self {
-            state_rx: rx,
-            _state_sender: sender,
-        })
+        Ok(Self { state_rx: rx })
     }
 
     /// Block until the session state becomes `Connected` or the timeout
@@ -533,6 +530,10 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
+        // Clear the static sender *first* so the SDK's background thread
+        // cannot send into a half-dropped channel (fixes macOS SIGBUS, #18).
+        callback::clear_session_sender();
+
         // SAFETY: `CorsairDisconnect` is safe to call at any time; it is a
         // no-op if not connected.  We ignore the return value because we
         // cannot propagate errors from `Drop`.

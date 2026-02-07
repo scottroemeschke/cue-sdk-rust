@@ -1,15 +1,20 @@
 //! Internal callback trampolines for the iCUE SDK.
 //!
-//! Every SDK callback follows the same pattern:
+//! Most SDK callbacks follow the same pattern:
 //! 1. A `Pin<Box<Sender<T>>>` is heap-allocated and its raw pointer passed as the
 //!    `context` parameter to the SDK.
 //! 2. A bare `extern "C" fn` trampoline casts the context back and sends the data
 //!    through the channel.
-//! 3. The owning struct (`Session`, `EventSubscription`) keeps the `Pin<Box<…>>`
+//! 3. The owning struct (`EventSubscription`) keeps the `Pin<Box<…>>`
 //!    alive for exactly as long as the SDK holds the pointer.
+//!
+//! **Session state** is the exception: its sender lives in a process-wide static
+//! so the SDK's background thread can never dereference a freed pointer (see
+//! issue #18).
 
 use std::pin::Pin;
 use std::sync::mpsc;
+use std::sync::Mutex;
 
 use core::ffi::c_void;
 use cue_sdk_sys as ffi;
@@ -25,14 +30,26 @@ pub(crate) struct SessionStateChange {
     pub details: ffi::CorsairSessionDetails,
 }
 
-/// Pinned sender kept alive by `Session`.
-pub(crate) type SessionStateSender = Pin<Box<mpsc::Sender<SessionStateChange>>>;
+/// Process-wide sender for session state changes.
+///
+/// The trampoline reads from this static instead of dereferencing a `context`
+/// pointer, so the pointer is always valid even if the SDK's background thread
+/// fires the callback during or after `CorsairDisconnect`.
+static SESSION_STATE_TX: Mutex<Option<mpsc::Sender<SessionStateChange>>> = Mutex::new(None);
 
-/// Create a (sender, receiver) pair for session state changes.  The sender is
-/// pinned on the heap so its address is stable for the SDK callback.
-pub(crate) fn session_state_channel() -> (SessionStateSender, mpsc::Receiver<SessionStateChange>) {
-    let (tx, rx) = mpsc::channel();
-    (Box::pin(tx), rx)
+/// Install a sender for session state changes into the process-wide static.
+pub(crate) fn install_session_sender(tx: mpsc::Sender<SessionStateChange>) {
+    // SAFETY (logical): Any previous sender is dropped here.  This is fine
+    // because it means the old receiver will see a disconnected channel.
+    *SESSION_STATE_TX.lock().unwrap() = Some(tx);
+}
+
+/// Remove the session state sender, making the trampoline a no-op.
+///
+/// Must be called **before** `CorsairDisconnect` so the SDK's background
+/// thread cannot send into a half-dropped channel.
+pub(crate) fn clear_session_sender() {
+    *SESSION_STATE_TX.lock().unwrap() = None;
 }
 
 /// Return a raw pointer suitable for the SDK `context` parameter.
@@ -45,24 +62,25 @@ pub(crate) fn sender_as_context<T>(sender: &Pin<Box<mpsc::Sender<T>>>) -> *mut c
 ///
 /// # Safety
 ///
-/// - `context` must be a valid pointer to a live `mpsc::Sender<SessionStateChange>`
-///   (guaranteed by the `Pin<Box<Sender>>` kept alive in `Session`).
 /// - `event_data` must point to a valid `CorsairSessionStateChanged`
 ///   (guaranteed by the SDK contract).
+/// - The `context` parameter is ignored; the sender is read from the
+///   process-wide `SESSION_STATE_TX` static.
 pub(crate) unsafe extern "C" fn session_state_trampoline(
-    context: *mut c_void,
+    _context: *mut c_void,
     event_data: *const ffi::CorsairSessionStateChanged,
 ) {
-    // SAFETY: `context` was created by `sender_as_context` from a pinned boxed
-    // sender that outlives the SDK callback registration.
-    let tx = unsafe { &*(context as *const mpsc::Sender<SessionStateChange>) };
     // SAFETY: `event_data` is provided by the SDK and valid for the duration of
     // this callback invocation.
     let data = unsafe { &*event_data };
-    let _ = tx.send(SessionStateChange {
-        state: data.state,
-        details: data.details,
-    });
+    if let Ok(guard) = SESSION_STATE_TX.lock() {
+        if let Some(tx) = guard.as_ref() {
+            let _ = tx.send(SessionStateChange {
+                state: data.state,
+                details: data.details,
+            });
+        }
+    }
 }
 
 // ---- Event callback --------------------------------------------------------

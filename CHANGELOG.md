@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.1.1] - 2026-02-07
+
+### Fixed
+- Fix macOS SIGBUS on reconnect: session state callback now uses a process-wide static sender instead of a per-`Session` pinned pointer, preventing use-after-free when the SDK's background thread fires during teardown (#18).
+- Fix CI smoke test deadlocks by running tests with `--test-threads=1` since the iCUE SDK uses global state (#19).
+
 ## [v0.1.0] - 2026-02-07
 
 Complete rewrite for iCUE SDK v4 (backed by `cue-sdk-sys` 0.1.0).
