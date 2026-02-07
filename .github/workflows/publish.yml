@@ -30,4 +30,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Publish to crates.io
-        run: cargo publish --token ${{ secrets.CRATES_TOKEN }}
+        run: cargo publish --allow-dirty --token ${{ secrets.CRATES_TOKEN }}
