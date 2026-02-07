@@ -84,11 +84,46 @@ for event in subscription.iter() {
 }
 ```
 
+## Async Event Listening
+
+Enable the `async` feature to get `AsyncEventSubscription` and
+`flush_led_colors_async()`:
+
+```toml
+[dependencies]
+cue-sdk = { version = "0.1", features = ["async"] }
+```
+
+```rust
+use std::time::Duration;
+use cue_sdk::event::Event;
+
+#[tokio::main]
+async fn main() {
+    let session = cue_sdk::connect().expect("connect failed");
+    session.wait_for_connection(Duration::from_secs(5)).expect("timeout");
+
+    let mut subscription = session.subscribe_for_events_async().expect("subscribe");
+    while let Some(event) = subscription.recv().await {
+        match event {
+            Event::DeviceConnectionChanged { device_id, is_connected } => {
+                println!("Device {} {}", device_id,
+                    if is_connected { "connected" } else { "disconnected" });
+            }
+            Event::KeyEvent { device_id, key_id, is_pressed } => {
+                println!("Key {:?} {} on {}", key_id,
+                    if is_pressed { "pressed" } else { "released" }, device_id);
+            }
+        }
+    }
+}
+```
+
 ## Features
 
 | Feature | Description |
 |---------|-------------|
-| `async` | Adds optional `tokio` dependency for async event support |
+| `async` | Adds `AsyncEventSubscription` and `flush_led_colors_async()` via optional `tokio` dependency |
 
 ## Examples
 
@@ -99,6 +134,7 @@ cargo run --example connect        # Print SDK version info
 cargo run --example devices        # List connected devices
 cargo run --example set_colors     # Set all keyboard LEDs to red
 cargo run --example events         # Listen for device/key events
+cargo run --example events_async --features async  # Async event listener
 ```
 
 ## Architecture

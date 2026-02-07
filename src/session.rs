@@ -8,6 +8,8 @@ use cue_sdk_sys as ffi;
 use crate::callback::{self, SessionStateChange};
 use crate::device::{DeviceId, DeviceInfo, DeviceType};
 use crate::error::{self, Result, SdkError};
+#[cfg(feature = "async")]
+use crate::event::AsyncEventSubscription;
 use crate::event::{EventSubscription, MacroKeyId};
 use crate::led::{LedColor, LedPosition};
 use crate::property::{DataType, PropertyFlags, PropertyId, PropertyInfo, PropertyValue};
@@ -368,6 +370,43 @@ impl Session {
     pub fn subscribe_for_events(&self) -> Result<EventSubscription> {
         let (sender, rx) = callback::event_channel();
         EventSubscription::new(sender, rx)
+    }
+
+    /// Subscribe to SDK events with an async receiver.
+    ///
+    /// Returns an [`AsyncEventSubscription`] whose [`recv`](AsyncEventSubscription::recv)
+    /// method is `async`.  The subscription unsubscribes on drop.
+    ///
+    /// Requires the `async` feature.
+    #[cfg(feature = "async")]
+    pub fn subscribe_for_events_async(&self) -> Result<AsyncEventSubscription> {
+        let (sender, rx) = callback::async_event_channel();
+        AsyncEventSubscription::new(sender, rx)
+    }
+
+    /// Flush all buffered LED color changes asynchronously.
+    ///
+    /// This is the async counterpart to [`flush_led_colors`](Self::flush_led_colors):
+    /// it `.await`s instead of blocking.
+    ///
+    /// Requires the `async` feature.
+    #[cfg(feature = "async")]
+    pub async fn flush_led_colors_async(&self) -> Result<()> {
+        let (sender, mut rx) = callback::async_flush_channel();
+        let ctx = callback::async_sender_as_context(&sender);
+
+        // SAFETY: We pass a valid trampoline and a context pointer to a pinned
+        // sender.  `sender` stays alive in this async fn's state until
+        // `rx.recv().await` returns, which happens after the SDK invokes the
+        // callback.
+        error::check(unsafe {
+            ffi::CorsairSetLedColorsFlushBufferAsync(Some(callback::async_flush_trampoline), ctx)
+        })?;
+
+        match rx.recv().await {
+            Some(code) => error::check(code),
+            None => Err(SdkError::NotConnected),
+        }
     }
 
     /// Configure whether a macro key event should be intercepted.

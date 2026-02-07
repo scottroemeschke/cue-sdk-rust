@@ -122,3 +122,90 @@ pub(crate) unsafe extern "C" fn flush_trampoline(context: *mut c_void, error: ff
     let tx = unsafe { &*(context as *const mpsc::Sender<ffi::CorsairError>) };
     let _ = tx.send(error);
 }
+
+// ---- Async (tokio) variants -----------------------------------------------
+
+#[cfg(feature = "async")]
+mod async_impl {
+    use std::pin::Pin;
+
+    use core::ffi::c_void;
+    use cue_sdk_sys as ffi;
+    use tokio::sync::mpsc as tokio_mpsc;
+
+    use crate::event::Event;
+
+    /// Pinned sender kept alive by `AsyncEventSubscription`.
+    pub(crate) type AsyncEventSender = Pin<Box<tokio_mpsc::UnboundedSender<Event>>>;
+
+    /// Pinned sender for a one-shot async flush result.
+    pub(crate) type AsyncFlushSender = Pin<Box<tokio_mpsc::UnboundedSender<ffi::CorsairError>>>;
+
+    /// Create a (sender, receiver) pair for async SDK events.
+    pub(crate) fn async_event_channel() -> (AsyncEventSender, tokio_mpsc::UnboundedReceiver<Event>)
+    {
+        let (tx, rx) = tokio_mpsc::unbounded_channel();
+        (Box::pin(tx), rx)
+    }
+
+    /// Create a (sender, receiver) pair for an async flush result.
+    pub(crate) fn async_flush_channel() -> (
+        AsyncFlushSender,
+        tokio_mpsc::UnboundedReceiver<ffi::CorsairError>,
+    ) {
+        let (tx, rx) = tokio_mpsc::unbounded_channel();
+        (Box::pin(tx), rx)
+    }
+
+    /// Return a raw pointer suitable for the SDK `context` parameter.
+    pub(crate) fn async_sender_as_context<T>(
+        sender: &Pin<Box<tokio_mpsc::UnboundedSender<T>>>,
+    ) -> *mut c_void {
+        let ptr: *const tokio_mpsc::UnboundedSender<T> = &**sender;
+        ptr as *mut c_void
+    }
+
+    /// `extern "C"` trampoline for `CorsairEventHandler` (async variant).
+    ///
+    /// # Safety
+    ///
+    /// - `context` must be a valid pointer to a live
+    ///   `tokio_mpsc::UnboundedSender<Event>` (guaranteed by the
+    ///   `Pin<Box<Sender>>` kept alive in `AsyncEventSubscription`).
+    /// - `event` must point to a valid `CorsairEvent` (guaranteed by the SDK).
+    pub(crate) unsafe extern "C" fn async_event_trampoline(
+        context: *mut c_void,
+        event: *const ffi::CorsairEvent,
+    ) {
+        // SAFETY: `context` was created by `async_sender_as_context` from a
+        // pinned boxed sender that outlives the SDK event subscription.
+        let tx = unsafe { &*(context as *const tokio_mpsc::UnboundedSender<Event>) };
+        // SAFETY: `event` is provided by the SDK and valid for the duration of
+        // this callback invocation.
+        let ev = unsafe { &*event };
+        if let Some(parsed) = Event::from_ffi(ev) {
+            let _ = tx.send(parsed);
+        }
+    }
+
+    /// `extern "C"` trampoline for `CorsairAsyncCallback` (async variant).
+    ///
+    /// # Safety
+    ///
+    /// - `context` must be a valid pointer to a live
+    ///   `tokio_mpsc::UnboundedSender<CorsairError>` (guaranteed by the
+    ///   `Pin<Box<Sender>>` kept alive in `flush_led_colors_async`).
+    pub(crate) unsafe extern "C" fn async_flush_trampoline(
+        context: *mut c_void,
+        error: ffi::CorsairError,
+    ) {
+        // SAFETY: `context` was created by `async_sender_as_context` from a
+        // pinned boxed sender held by the async method until the receiver
+        // gets the result.
+        let tx = unsafe { &*(context as *const tokio_mpsc::UnboundedSender<ffi::CorsairError>) };
+        let _ = tx.send(error);
+    }
+}
+
+#[cfg(feature = "async")]
+pub(crate) use async_impl::*;

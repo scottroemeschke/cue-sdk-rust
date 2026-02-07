@@ -170,3 +170,63 @@ impl Drop for EventSubscription {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// AsyncEventSubscription (feature = "async")
+// ---------------------------------------------------------------------------
+
+/// An active event subscription with an async receiver.
+///
+/// Events can be received via [`recv`](Self::recv).  When this value is
+/// dropped the subscription is automatically cancelled by calling
+/// `CorsairUnsubscribeFromEvents`.
+///
+/// Requires the `async` feature.
+#[cfg(feature = "async")]
+pub struct AsyncEventSubscription {
+    rx: tokio::sync::mpsc::UnboundedReceiver<Event>,
+    // Prevent the sender from being dropped while the SDK holds the pointer.
+    _sender: callback::AsyncEventSender,
+}
+
+#[cfg(feature = "async")]
+impl AsyncEventSubscription {
+    /// Create a new async subscription.  Called by
+    /// `Session::subscribe_for_events_async`.
+    pub(crate) fn new(
+        sender: callback::AsyncEventSender,
+        rx: tokio::sync::mpsc::UnboundedReceiver<Event>,
+    ) -> Result<Self> {
+        let ctx = callback::async_sender_as_context(&sender);
+        // SAFETY: We pass a valid function pointer and a context pointer
+        // derived from a pinned boxed sender that we keep alive in the
+        // returned struct.
+        error::check(unsafe {
+            ffi::CorsairSubscribeForEvents(Some(callback::async_event_trampoline), ctx)
+        })?;
+        Ok(Self {
+            rx,
+            _sender: sender,
+        })
+    }
+
+    /// Await the next event from the SDK.
+    ///
+    /// Returns `None` if the sender is dropped (should not happen while the
+    /// subscription is alive).
+    pub async fn recv(&mut self) -> Option<Event> {
+        self.rx.recv().await
+    }
+}
+
+#[cfg(feature = "async")]
+impl Drop for AsyncEventSubscription {
+    fn drop(&mut self) {
+        // SAFETY: `CorsairUnsubscribeFromEvents` is safe to call at any time
+        // and will stop the SDK from invoking the callback, after which the
+        // pinned sender can be safely dropped.
+        unsafe {
+            let _ = ffi::CorsairUnsubscribeFromEvents();
+        }
+    }
+}

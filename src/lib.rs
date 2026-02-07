@@ -35,6 +35,8 @@ pub mod session;
 
 pub use device::{DeviceId, DeviceInfo, DeviceType};
 pub use error::{Result, SdkError};
+#[cfg(feature = "async")]
+pub use event::AsyncEventSubscription;
 pub use event::{Event, EventSubscription, MacroKeyId};
 pub use led::{LedColor, LedPosition};
 pub use property::{PropertyId, PropertyValue};
